@@ -41,23 +41,34 @@ const char* ts_scope_current() {
 }
 
 bool ts_insert(const char *id, SymbolCat cat, DataType type, int extra) {
-    // Verifica se já existe no escopo ATUAL (não permite duplicatas no mesmo nível)
+    // 1. Montar o caminho de escopo atual para comparação e inserção
+    char current_path[256] = "";
+    for (int i = 0; i <= ts.top_scope; i++) {
+        strcat(current_path, ts.scope_stack[i]);
+        if (i < ts.top_scope) strcat(current_path, ".");
+    }
+
+    // 2. Verifica duplicatas no escopo atual exato
     for (int i = 0; i < ts.count; i++) {
         if (strcmp(ts.data[i].id, id) == 0 && 
-            strcmp(ts.data[i].scope, ts_scope_current()) == 0) {
+            strcmp(ts.data[i].scope, current_path) == 0) {
             return false; 
         }
     }
 
+    // 3. Insere o novo símbolo
     if (ts.count < MAX_SYMBOLS) {
         Symbol *s = &ts.data[ts.count++];
         strcpy(s->id, id);
         s->cat = cat;
         s->type = type;
         s->extra = extra;
-        strcpy(s->scope, ts_scope_current());
+        
+        strcpy(s->scope, current_path);
+        
         return true;
     }
+    
     return false;
 }
 
