@@ -12,6 +12,8 @@ static Token lookahead;
 // --- Protótipos de Funções Internas ---
 void parse_id();
 void parse_glob();
+void parse_princ_corpo();
+void parse_proc_com_nome(const char* name);
 void parse_decls();
 DataType parse_tpo(int *size);
 void parse_subs();
@@ -27,7 +29,9 @@ void parse_if();
 void parse_mat();
 void parse_fr();
 void parse_wh();
+void parse_wh_corpo();
 void parse_rpt();
+void parse_rpt_corpo();
 void parse_atr();
 void parse_call();
 void parse_ret();
@@ -64,21 +68,55 @@ bool is_cmd() {
 bool parse_program() {
     lookahead = lex_next();
     
-    // ini ::= “sMODULE” id ";“ glob? subs? princ
-    diag_info("Entrando em parse_program");
+    // 1. Módulo
     match(sMODULE);
+    ts_insert(lookahead.lexema, SYM_VAR, TYPE_VOID, 0); 
     match(sIDENTIF);
     match(sPONTO_VIRG);
 
-    if (lookahead.cat == sGLOBALS) parse_glob();
-    if (lookahead.cat == sFN || lookahead.cat == sPROC) parse_subs();
-    
-    parse_princ();
+    // 2. Globais (Opcional)
+    if (lookahead.cat == sGLOBALS) {
+        parse_glob();
+    }
+
+    // 3. Sub-rotinas (fn ou proc)
+    while (lookahead.cat == sFN || lookahead.cat == sPROC) {
+        if (lookahead.cat == sPROC) {
+
+            Token t_nome = lex_next(); 
+            
+            if (strcmp(t_nome.lexema, "main") == 0) {
+
+                ts_insert(t_nome.lexema, SYM_PROC, TYPE_VOID, 0);
+                
+                lookahead = lex_next(); 
+                
+                parse_princ_corpo(); 
+
+                goto finalizar; 
+            } else {
+                parse_proc_com_nome(t_nome.lexema);
+            }
+        } else {
+            parse_func();
+        }
+    }
+
+    // 4. Se o loop terminou sem encontrar o main via 'goto'
+    if (lookahead.cat != sEOF) {
+        parse_princ();
+    }
+
+finalizar:
+    while (lookahead.cat == sEND) {
+        match(sEND);
+    }
 
     if (lookahead.cat != sEOF) {
-        diag_error("Fim de Arquivo", lookahead);
+        match(sEOF);
     }
-    diag_info("Programa analisado com sucesso.");
+
+    diag_info("Análise sintática concluída com sucesso!");
     return true;
 }
 
@@ -88,6 +126,48 @@ void parse_glob() {
     while (lookahead.cat == sIDENTIF) {
         parse_decls();
     }
+}
+
+void parse_princ_corpo() {
+    match(sABRE_PAR);
+    match(sFECHA_PAR);
+
+    // 1. Entra no escopo do main antes de processar locals ou comandos
+    ts_scope_push("proc:main");
+
+    // 2. Verificação de LOCALS
+    if (lookahead.cat == sLOCALS) {
+        match(sLOCALS);
+        while (lookahead.cat == sIDENTIF) {
+            parse_decls();
+        }
+    }
+
+    // 3. Processa o bloco start...end
+    parse_bco();
+    
+    // 4. Sai do escopo
+    ts_scope_pop();
+}
+
+void parse_proc_com_nome(const char* name) {
+    ts_insert(name, SYM_PROC, TYPE_VOID, 0);
+
+    char scope_name[300];
+    sprintf(scope_name, "proc:%s", name);
+    ts_scope_push(scope_name);
+
+    match(sABRE_PAR);
+    if (lookahead.cat == sIDENTIF) parse_param();
+    match(sFECHA_PAR);
+
+    if (lookahead.cat == sLOCALS) {
+        match(sLOCALS);
+        while(lookahead.cat == sIDENTIF) parse_decls();
+    }
+
+    parse_bco();
+    ts_scope_pop();
 }
 
 void parse_decls() {
@@ -137,7 +217,7 @@ DataType parse_tpo(int *size) {
 }
 
 void parse_subs() {
-    while (lookahead.cat == sFN || lookahead.cat == sPROC) {
+    while (lookahead.cat == sFN || (lookahead.cat == sPROC && strcmp(lookahead.lexema, "main") != 0)) {
         if (lookahead.cat == sFN) parse_func();
         else parse_proc();
     }
@@ -170,12 +250,52 @@ void parse_func() {
     ts_scope_pop();
 }
 
+void parse_princ() {
+    // 1. Consome 'proc'
+    match(sPROC);
+    
+    // 2. Verifica 'main' e insere na TS enquanto o escopo ainda é global
+    if (strcmp(lookahead.lexema, "main") == 0) {
+        ts_insert(lookahead.lexema, SYM_PROC, TYPE_VOID, 0);
+        match(sIDENTIF); 
+    } else {
+        diag_error("Identificador 'main' esperado", lookahead);
+        exit(EXIT_FAILURE);
+    }
+
+    match(sABRE_PAR);
+    match(sFECHA_PAR);
+    
+    // 3. Entra no escopo do main ANTES de processar as variáveis locais
+    ts_scope_push("proc:main");
+
+    // 4. Tratamento de LOCALS
+    if (lookahead.cat == sLOCALS) {
+        match(sLOCALS);
+        while (lookahead.cat == sIDENTIF) {
+            parse_decls();
+        }
+    }
+
+    parse_bco();
+    
+    // 5. Sai do escopo
+    ts_scope_pop();
+}
+
 void parse_proc() {
     match(sPROC);
+    
+    // 1. Salva o nome do procedimento (lookahead agora é o IDENTIF)
     char name[256];
     strcpy(name, lookahead.lexema);
+    
+    // 2. Insere na TS no escopo atual (global) antes de entrar no escopo interno
+    ts_insert(name, SYM_PROC, TYPE_VOID, 0);
+    
     match(sIDENTIF);
 
+    // 3. Cria o novo escopo para o conteúdo interno
     char scope_name[300];
     sprintf(scope_name, "proc:%s", name);
     ts_scope_push(scope_name);
@@ -184,29 +304,14 @@ void parse_proc() {
     if (lookahead.cat == sIDENTIF) parse_param();
     match(sFECHA_PAR);
 
-    ts_insert(name, SYM_PROC, TYPE_VOID, 0);
-
     if (lookahead.cat == sLOCALS) {
         match(sLOCALS);
         while(lookahead.cat == sIDENTIF) parse_decls();
     }
 
     parse_bco();
-    ts_scope_pop();
-}
-
-void parse_princ() {
-    match(sPROC);
-    match(sMAIN);
-    match(sABRE_PAR);
-    match(sFECHA_PAR);
     
-    ts_scope_push("proc:main");
-    if (lookahead.cat == sLOCALS) {
-        match(sLOCALS);
-        while(lookahead.cat == sIDENTIF) parse_decls();
-    }
-    parse_bco();
+    // 4. Sai do escopo e volta para o global
     ts_scope_pop();
 }
 
@@ -233,31 +338,51 @@ void parse_bco() {
 
 void parse_cmd() {
     switch (lookahead.cat) {
-        case sPRINT: parse_out(); break;
-        case sSCAN:  parse_inp(); break;
-        case sIF:    parse_if();  break;
-        case sMATCH: parse_mat(); break;
-        case sFOR:   parse_fr();  break;
+        case sPRINT: 
+            parse_out(); 
+            break;
+        case sSCAN:  
+            parse_inp(); 
+            break;
+        case sIF:    
+            parse_if();  
+            break;
+        case sMATCH: 
+            parse_mat(); 
+            break;
+        case sFOR:   
+            parse_fr();  
+            break;
         case sLOOP:  
-            if (lex_next().cat == sWHILE) parse_wh();
-            else parse_rpt(); 
+            match(sLOOP); // Consome 'loop'
+            if (lookahead.cat == sWHILE) {
+                parse_wh_corpo(); 
+            } else {
+                parse_rpt_corpo(); 
+            }
             break;
-        case sRET:   parse_ret(); break;
-        case sSTART: parse_bco(); break;
+        case sRET:   
+            parse_ret(); 
+            break;
+        case sSTART: 
+            parse_bco(); 
+            break;
         case sIDENTIF:
-            parse_atr(); // parse_atr trata id := ou id[x] :=
+            parse_atr(); 
             break;
-        default: diag_error("Comando", lookahead);
+        default: 
+            diag_error("Comando esperado (print, scan, if, loop, etc.)", lookahead);
+            exit(EXIT_FAILURE);
     }
 }
 
 void parse_out() {
     match(sPRINT);
     match(sABRE_PAR);
-    parse_elem();
+    parse_expr();
     while (lookahead.cat == sVIRGULA) {
         match(sVIRGULA);
-        parse_elem();
+        parse_expr();
     }
     match(sFECHA_PAR);
 }
@@ -301,6 +426,10 @@ void parse_fr() {
 
 void parse_wh() {
     match(sLOOP);
+    parse_wh_corpo();
+}
+
+void parse_wh_corpo() {
     match(sWHILE);
     match(sABRE_PAR);
     parse_expr();
@@ -310,10 +439,16 @@ void parse_wh() {
 
 void parse_rpt() {
     match(sLOOP);
-    while (lookahead.cat != sUNTIL) {
+    parse_rpt_corpo();
+}
+
+void parse_rpt_corpo() {
+    if (lookahead.cat == sSTART) {
+        parse_bco();
+    } else {
         parse_cmd();
-        if (lookahead.cat == sPONTO_VIRG) match(sPONTO_VIRG);
     }
+    
     match(sUNTIL);
     match(sABRE_PAR);
     parse_expr();
@@ -333,7 +468,7 @@ void parse_atr() {
 
 void parse_ret() {
     match(sRET);
-    parse_elem();
+    parse_expr();
 }
 
 void parse_mat() {
@@ -341,13 +476,26 @@ void parse_mat() {
     match(sABRE_PAR);
     parse_expr();
     match(sFECHA_PAR);
+
     while (lookahead.cat == sWHEN) {
         match(sWHEN);
-        parse_expr();
+        
+        do {
+            if (lookahead.cat == sVIRGULA) match(sVIRGULA);
+            
+            parse_expr(); // Lê o valor (ex: 1 ou 100)
+            
+            if (lookahead.cat == sPTOPTO) {
+                match(sPTOPTO);
+                parse_expr(); // Lê o fim do intervalo (ex: 199)
+            }
+        } while (lookahead.cat == sVIRGULA);
+
         match(sIMPLIC);
         parse_cmd();
         match(sPONTO_VIRG);
     }
+
     if (lookahead.cat == sOTHERWISE) {
         match(sOTHERWISE);
         match(sIMPLIC);
@@ -360,11 +508,12 @@ void parse_mat() {
 // --- Expressões e Precedência ---
 
 void parse_elem() {
-    if (lookahead.cat == sSTRING || lookahead.cat == sCTEINT || lookahead.cat == sCTECHAR) {
+    if (lookahead.cat == sSTRING || lookahead.cat == sCTEINT || lookahead.cat == sCTECHAR || 
+        lookahead.cat == sTRUE || lookahead.cat == sFALSE) {
         match(lookahead.cat);
     } else if (lookahead.cat == sIDENTIF) {
         match(sIDENTIF);
-        if (lookahead.cat == sABRE_PAR) { // Chamada de subrotina
+        if (lookahead.cat == sABRE_PAR) { // Chamada
             match(sABRE_PAR);
             if (lookahead.cat != sFECHA_PAR) {
                 parse_expr();
@@ -380,20 +529,22 @@ void parse_elem() {
             match(sFECHA_COL);
         }
     } else {
-        parse_expr();
+
+        diag_error("Expressão ou Valor", lookahead);
+        exit(EXIT_FAILURE); 
     }
 }
 
 void parse_expr() {
     parse_exlog();
-    while (lookahead.cat == sOR) {
+    while (lookahead.cat == sOR) { 
         match(sOR);
         parse_exlog();
     }
 }
 
 void parse_exlog() {
-    parse_exrel();
+    parse_exrel()
     while (lookahead.cat == sAND) {
         match(sAND);
         parse_exrel();
