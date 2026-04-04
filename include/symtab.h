@@ -1,6 +1,7 @@
 #ifndef SYMTAB_H
 #define SYMTAB_H
 
+#include <stdio.h>
 #include "common.h"
 
 // Categorias de símbolos na tabela
