@@ -18,7 +18,7 @@ typedef struct {
     char id[256];
     SymbolCat cat;
     DataType type;
-    int extra;      // Tamanho do vetor ou Qtd de parâmetros
+    int extra; // Tamanho do vetor ou Qtd de parâmetros
     char scope[128];
 } Symbol;
 
