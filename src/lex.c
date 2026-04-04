@@ -19,8 +19,8 @@ static struct {
     {"loop", sLOOP}, {"match", sMATCH}, {"module", sMODULE}, 
     {"otherwise", sOTHERWISE}, {"print", sPRINT}, {"proc", sPROC},
     {"ret", sRET}, {"scan", sSCAN}, {"start", sSTART}, {"step", sSTEP},
-    {"to", sTO}, {"true", sTRUE}, {"until", sUNTIL}, {"when", sWHEN},
-    {"main", sMAIN}, {NULL, sERRO}
+    {"to", sTO}, {"true", sTRUE}, {"until", sUNTIL}, {"when", sWHEN}, {"while", sWHILE},
+    {"v", sOR}, {"^", sAND}, {NULL, sERRO}
 };
 
 bool lex_init(const char *source_path) {
@@ -46,17 +46,71 @@ static void unread_char(int c) {
 
 // Converte a categoria para String para o log
 const char* lex_cat_to_str(Category cat) {
-    switch(cat) {
-        case sIDENTIF: return "sIDENTIF"; case sCTEINT: return "sCTEINT";
-        case sMODULE: return "sMODULE";   case sSTART: return "sSTART";
-        case sEND: return "sEND";         case sATRIB: return "sATRIB";
-        case sIF: return "sIF";           case sPRINT: return "sPRINT";
-        case sSOMA: return "sSOMA";       case sSUBRAT: return "sSUBRAT";
-        case sMULT: return "sMULT";       case sDIV: return "sDIV";
-        case sIGUAL: return "sIGUAL";     case sDIFERENTE: return "sDIFERENTE";
-        case sPTOPTO: return "sPTOPTO";   case sIMPLIC: return "sIMPLIC";
-        // Adicionar demais conforme necessário para o log...
-        default: return "TOKEN_UNK";
+    switch (cat) {
+        // Palavras-reservadas
+        case sMODULE:    return "sMODULE";
+        case sGLOBALS:   return "sGLOBALS";
+        case sLOCALS:    return "sLOCALS";
+        case sFN:        return "sFN";
+        case sPROC:      return "sPROC";
+        case sMAIN:      return "sMAIN";
+        case sSTART:     return "sSTART";
+        case sEND:       return "sEND";
+        case sRET:       return "sRET";
+        case sIF:         return "sIF";
+        case sELSE:       return "sELSE";
+        case sMATCH:      return "sMATCH";
+        case sWHEN:       return "sWHEN";
+        case sOTHERWISE:  return "sOTHERWISE";
+        case sFOR:        return "sFOR";
+        case sTO:         return "sTO";
+        case sSTEP:       return "sSTEP";
+        case sDO:         return "sDO";
+        case sLOOP:       return "sLOOP";
+        case sWHILE:      return "sWHILE";
+        case sUNTIL:      return "sUNTIL";
+        case sINT:        return "sINT";
+        case sBOOL:       return "sBOOL";
+        case sCHAR:       return "sCHAR";
+        case sPRINT:      return "sPRINT";
+        case sSCAN:       return "sSCAN";
+        case sTRUE:       return "sTRUE";
+        case sFALSE:      return "sFALSE";
+
+        // Operadores e Delimitadores
+        case sATRIB:      return "sATRIB";
+        case sSOMA:       return "sSOMA";
+        case sSUBRAT:     return "sSUBRAT";
+        case sMULT:       return "sMULT";
+        case sDIV:        return "sDIV";
+        case sMAIOR:      return "sMAIOR";
+        case sMENOR:      return "sMENOR";
+        case sMAIORIG:    return "sMAIORIG";
+        case sMENORIG:    return "sMENORIG";
+        case sIGUAL:      return "sIGUAL";
+        case sDIFERENTE:  return "sDIFERENTE";
+        case sAND:        return "sAND";
+        case sOR:         return "sOR";
+        case sNEG:        return "sNEG";
+        case sIMPLIC:     return "sIMPLIC";
+        case sPTOPTO:     return "sPTOPTO";
+        case sABRE_PAR:   return "sABRE_PAR";
+        case sFECHA_PAR:  return "sFECHA_PAR";
+        case sABRE_COL:   return "sABRE_COL";
+        case sFECHA_COL:  return "sFECHA_COL";
+        case sVIRGULA:    return "sVIRGULA";
+        case sPONTO_VIRG: return "sPONTO_VIRG";
+        case sDOIS_PONTOS: return "sDOIS_PONTOS";
+
+        // Terminais Dinâmicos
+        case sIDENTIF:    return "sIDENTIF";
+        case sCTEINT:     return "sCTEINT";
+        case sCTECHAR:    return "sCTECHAR";
+        case sSTRING:     return "sSTRING";
+        case sEOF:        return "sEOF";
+        case sERRO:       return "sERRO";
+
+        default:          return "TOKEN_UNK";
     }
 }
 
@@ -65,15 +119,18 @@ Token lex_next() {
     int c;
 
     while ((c = next_char()) != EOF) {
-        // Pular espaços e brancos
+        // 1. Pular espaços e brancos
         if (isspace(c)) continue;
 
-        // Comentários: @ ou @{
+        // 2. Comentários: @ ou @{
         if (c == '@') {
             int next = next_char();
             if (next == '{') { // Bloco @{ ... }@
                 while ((c = next_char()) != EOF) {
-                    if (c == '}' && (next = next_char()) == '@') break;
+                    if (c == '}') {
+                        if ((next = next_char()) == '@') break;
+                        else unread_char(next);
+                    }
                 }
             } else { // Linha @...
                 while (c != '\n' && c != EOF) c = next_char();
@@ -83,7 +140,7 @@ Token lex_next() {
 
         t.linha = current_line;
 
-        // Identificadores e Palavras Reservadas
+        // 3. Identificadores e Palavras Reservadas
         if (isalpha(c) || c == '_') {
             int pos = 0;
             t.lexema[pos++] = c;
@@ -101,10 +158,11 @@ Token lex_next() {
                     break;
                 }
             }
-            goto end_token;
+            if (opts_get()->dump_tokens) log_token(t);
+            return t;
         }
 
-        // Números (sCTEINT)
+        // 4. Números (sCTEINT)
         if (isdigit(c)) {
             int pos = 0;
             t.lexema[pos++] = c;
@@ -114,10 +172,11 @@ Token lex_next() {
             unread_char(c);
             t.lexema[pos] = '\0';
             t.cat = sCTEINT;
-            goto end_token;
+            if (opts_get()->dump_tokens) log_token(t);
+            return t;
         }
 
-        // Strings "..."
+        // 5. Strings "..."
         if (c == '"') {
             int pos = 0;
             while ((c = next_char()) != '"' && c != EOF) {
@@ -125,12 +184,14 @@ Token lex_next() {
             }
             t.lexema[pos] = '\0';
             t.cat = sSTRING;
-            goto end_token;
+            if (opts_get()->dump_tokens) log_token(t);
+            return t;
         }
 
-        // Operadores Compostos e Simples
-        t.lexema[0] = c;
+        // 6. Operadores e Pontuação
+        t.lexema[0] = (char)c;
         t.lexema[1] = '\0';
+        
         switch (c) {
             case ':':
                 if ((c = next_char()) == '=') {
@@ -142,16 +203,10 @@ Token lex_next() {
                 }
                 break;
             case '<':
-                if ((c = next_char()) == '>') {
-                    strcpy(t.lexema, "<>");
-                    t.cat = sDIFERENTE;
-                } else if (c == '=') {
-                    strcpy(t.lexema, "<=");
-                    t.cat = sMENORIG;
-                } else {
-                    unread_char(c);
-                    t.cat = sMENOR;
-                }
+                c = next_char();
+                if (c == '>') { strcpy(t.lexema, "<>"); t.cat = sDIFERENTE; }
+                else if (c == '=') { strcpy(t.lexema, "<="); t.cat = sMENORIG; }
+                else { unread_char(c); t.cat = sMENOR; }
                 break;
             case '>':
                 if ((c = next_char()) == '=') {
@@ -177,7 +232,7 @@ Token lex_next() {
                     t.cat = sPTOPTO;
                 } else {
                     unread_char(c);
-                    t.cat = sERRO;
+                    t.cat = sERRO; // SAL não tem ponto sozinho, então é considera ERRO
                 }
                 break;
             case '+': t.cat = sSOMA; break;
@@ -195,14 +250,15 @@ Token lex_next() {
             case '~': t.cat = sNEG; break;
             default:  t.cat = sERRO; break;
         }
-        goto end_token;
+        
+        if (opts_get()->dump_tokens) log_token(t);
+        return t;
     }
 
+    // 7. Fim de Arquivo
     t.cat = sEOF;
     strcpy(t.lexema, "EOF");
     t.linha = current_line;
-
-end_token:
     if (opts_get()->dump_tokens) log_token(t);
     return t;
 }
