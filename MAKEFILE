@@ -9,8 +9,10 @@ all: $(EXEC)
 $(EXEC): $(OBJ)
 	$(CC) $(OBJ) -o $(EXEC)
 
-%.o: %.c
+src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f src/*.o $(EXEC)
+	rm -f src/*.o $(EXEC) *.tk *.ts *.trc
+
+.PHONY: all clean
