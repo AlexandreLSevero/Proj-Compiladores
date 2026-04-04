@@ -1,0 +1,17 @@
+module Exemplo_07;
+proc main()
+locals
+ cod : int;
+start
+ print("Digite o código do chamado:");
+ scan(cod);
+ match (cod)
+ when 0 => print("Teste: nenhuma ação necessária.");
+ when 9999 => print("Encerrar sistema de triagem.");
+ when 1, 2, 3 => print("URGENTE: acionar equipe de resgate.");
+ when 100..199 => print("Prior. Alta: encaminhar ao n2.");
+ when 200..499 => print("Prior. Média: direcionar ao n1.");
+ when 500..999 => print("Prior. Baixa: colocar na fila.");
+ otherwise => print("Código inválido ou desconhecido.");
+ end;
+end
