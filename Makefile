@@ -1,8 +1,8 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -Iinclude
-SRC = $(wildcard src/*.c)
-OBJ = $(SRC:.c=.o)
-EXEC = salc
+CC      = gcc
+CFLAGS  = -Wall -Wextra -std=c99 -Iinclude
+SRC     = $(wildcard src/*.c)
+OBJ     = $(SRC:.c=.o)
+EXEC    = salc
 
 all: $(EXEC)
 
@@ -13,6 +13,6 @@ src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f src/*.o $(EXEC) *.tk *.ts *.trc
+	rm -f src/*.o $(EXEC) *.tk *.ts *.trc *.mepa
 
 .PHONY: all clean
