@@ -24,6 +24,8 @@ typedef struct {
     /* Campos para geração de código MEPA */
     int nivel;      /* Nível léxico de declaração (0 = global) */
     int offset;     /* Deslocamento dentro do nível (0-based)  */
+    char rotulo_mepa[16]; /* Rótulo de entrada da sub-rotina (ex: "L3") */
+    int  n_params;  /* Quantidade de parâmetros (para RTPR) */
 } Symbol;
 
 /* ─── Gerenciamento de Escopo ─────────────────────────────── */
