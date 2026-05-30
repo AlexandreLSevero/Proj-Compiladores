@@ -28,7 +28,7 @@ static DataType  parse_tpo(int *size);
 static void      parse_func(void);
 static void      parse_proc(void);
 static void      parse_princ(void);
-static void      parse_param(void);
+static int       parse_param(void);        /* retorna qtde de params */
 static void      parse_bco(void);
 static void      parse_cmd(void);
 static void      parse_out(void);
@@ -47,6 +47,7 @@ static DataType  parse_exari(void);
 static DataType  parse_exarp(void);
 static DataType  parse_fact(void);
 static DataType  parse_elem(void);
+static int parse_param_impl(bool is_func);
 
 /* ══════════════════════════════════════════════════════════════════════
  * Helpers
@@ -240,6 +241,7 @@ static void parse_princ_corpo(void) {
     match(sFECHA_PAR);
 
     ts_scope_push("proc:main");
+    int nivel_atual = ts_nivel_atual();
 
     int qtde_locals = 0;
     if (lookahead.cat == sLOCALS) {
@@ -248,6 +250,7 @@ static void parse_princ_corpo(void) {
             qtde_locals += parse_decls();
     }
 
+    /* main não usa ENPR/RTPR — é chamada diretamente pelo programa principal */
     if (qtde_locals > 0)
         ger_emite(NULL, "AMEM", itoa_s(qtde_locals), NULL);
 
@@ -257,6 +260,7 @@ static void parse_princ_corpo(void) {
         ger_emite(NULL, "DMEM", itoa_s(qtde_locals), NULL);
 
     ts_scope_pop();
+    (void)nivel_atual;
 }
 
 static void parse_princ(void) {
@@ -300,32 +304,66 @@ static void parse_princ(void) {
  * ══════════════════════════════════════════════════════════════════════ */
 
 static void parse_proc_com_nome(const char *name) {
+    /* Gera rótulo de entrada e registra na tabela de símbolos */
+    char *lentry = strdup(ger_novo_rotulo());
+
+    /* Insere na tabela do escopo PAI (global), antes de empurrar escopo */
     ts_insert(name, SYM_PROC, TYPE_VOID, 0);
+    Symbol *sym_proc = ts_lookup(name);
+    if (sym_proc) {
+        strncpy(sym_proc->rotulo_mepa, lentry, sizeof(sym_proc->rotulo_mepa) - 1);
+    }
+
+    /* Pula o corpo do proc durante execução do main (será chamado via CHPR) */
+    char *lskip = strdup(ger_novo_rotulo());
+    ger_emite(NULL, "DSVS", lskip, NULL);
+
+    /* Entrada do procedimento */
+    ger_emite(lentry, "NADA", NULL, NULL);
 
     char scope_name[300];
     snprintf(scope_name, sizeof(scope_name), "proc:%s", name);
     ts_scope_push(scope_name);
 
+    int nivel_atual = ts_nivel_atual();
+
+    /* Parâmetros */
     match(sABRE_PAR);
-    if (lookahead.cat == sIDENTIF) parse_param();
+    int n_params = 0;
+    if (lookahead.cat == sIDENTIF) {
+        n_params = parse_param();
+    }
     match(sFECHA_PAR);
 
+    if (sym_proc) sym_proc->n_params = n_params;
+
+    /* ENPR k — entrada do procedimento no nível k */
+    ger_emite(NULL, "ENPR", itoa_s(nivel_atual), NULL);
+
+    /* Locals */
     int qtde_locals = 0;
     if (lookahead.cat == sLOCALS) {
         match(sLOCALS);
         while (lookahead.cat == sIDENTIF)
             qtde_locals += parse_decls();
     }
-
     if (qtde_locals > 0)
         ger_emite(NULL, "AMEM", itoa_s(qtde_locals), NULL);
 
     parse_bco();
 
+    /* Desaloca locals e retorna */
     if (qtde_locals > 0)
         ger_emite(NULL, "DMEM", itoa_s(qtde_locals), NULL);
 
+    ger_emite(NULL, "RTPR", itoa_s(n_params), itoa_s(nivel_atual));
+
     ts_scope_pop();
+
+    ger_emite(lskip, "NADA", NULL, NULL);
+
+    free(lentry);
+    free(lskip);
 }
 
 static void parse_proc(void) {
@@ -369,17 +407,36 @@ static void parse_func(void) {
     strncpy(name, lookahead.lexema, 255);
     match(sIDENTIF);
 
+    char *lentry = strdup(ger_novo_rotulo());
+    char *lskip  = strdup(ger_novo_rotulo());
+
+    ger_emite(NULL, "DSVS", lskip, NULL);
+    ger_emite(lentry, "NADA", NULL, NULL);
+
     char scope_name[300];
     snprintf(scope_name, sizeof(scope_name), "fn:%s", name);
     ts_scope_push(scope_name);
+    int nivel_atual = ts_nivel_atual();
 
     match(sABRE_PAR);
-    if (lookahead.cat == sIDENTIF) parse_param();
+    int n_params = 0;
+    if (lookahead.cat == sIDENTIF)
+        n_params = parse_param_impl(true);   /* is_func=true: offset inclui slot de retorno */
     match(sFECHA_PAR);
     match(sDOIS_PONTOS);
-
     DataType t = parse_tpo(NULL);
-    ts_insert(name, SYM_FUNC, t, 0);
+
+    /* Registra no escopo pai */
+    ts_scope_pop();
+    ts_insert(name, SYM_FUNC, t, n_params);
+    Symbol *sym_fn = ts_lookup(name);
+    if (sym_fn) {
+        strncpy(sym_fn->rotulo_mepa, lentry, sizeof(sym_fn->rotulo_mepa) - 1);
+        sym_fn->n_params = n_params;
+    }
+    ts_scope_push(scope_name);
+
+    ger_emite(NULL, "ENPR", itoa_s(nivel_atual), NULL);
 
     int qtde_locals = 0;
     if (lookahead.cat == sLOCALS) {
@@ -387,7 +444,6 @@ static void parse_func(void) {
         while (lookahead.cat == sIDENTIF)
             qtde_locals += parse_decls();
     }
-
     if (qtde_locals > 0)
         ger_emite(NULL, "AMEM", itoa_s(qtde_locals), NULL);
 
@@ -396,20 +452,55 @@ static void parse_func(void) {
     if (qtde_locals > 0)
         ger_emite(NULL, "DMEM", itoa_s(qtde_locals), NULL);
 
+    ger_emite(NULL, "RTPR", itoa_s(n_params), itoa_s(nivel_atual));
+
     ts_scope_pop();
+    ger_emite(lskip, "NADA", NULL, NULL);
+
+    free(lentry);
+    free(lskip);
 }
 
-static void parse_param(void) {
+/* parse_param: insere parâmetros no escopo atual e retorna a quantidade.
+ *
+ * Protocolo MEPA para chamada de função com retorno:
+ *   caller emite:  AMEM 1 (slot retorno), CRCT arg1, CRCT arg2, CHPR L,k
+ *   dentro da fn:  params ficam em D[nivel_pai] + qtde_globais + 1 + i
+ *                  slot retorno fica em D[nivel_pai] + qtde_globais + 0
+ *
+ * Para proc (sem retorno), o AMEM 1 não é emitido e offset = qtde_globais + i.
+ * is_func indica se estamos num fn (true) ou proc (false).
+ */
+static int parse_param_impl(bool is_func) {
+    int nivel_pai = ts_nivel_atual() - 1;
+    if (nivel_pai < 0) nivel_pai = 0;
+
+    /* Offset base: globais já ocupam as primeiras posições no nível 0.
+     * Se é fn, AMEM 1 reserva mais 1 slot antes dos params. */
+    int base_offset = qtde_globais + (is_func ? 1 : 0);
+
+    int count = 0;
     do {
         if (lookahead.cat == sVIRGULA) match(sVIRGULA);
+
         char id[256];
         strncpy(id, lookahead.lexema, 255);
         match(sIDENTIF);
         match(sDOIS_PONTOS);
         DataType t = parse_tpo(NULL);
+
         ts_insert(id, SYM_PARAM, t, 0);
+        Symbol *s = ts_lookup(id);
+        if (s) {
+            s->nivel  = nivel_pai;
+            s->offset = base_offset + count;
+        }
+        count++;
     } while (lookahead.cat == sVIRGULA);
+    return count;
 }
+
+static int parse_param(void) { return parse_param_impl(false); }
 
 /* ══════════════════════════════════════════════════════════════════════
  * Bloco e Comandos
@@ -864,12 +955,36 @@ static void parse_atr(void) {
         sem_error(msg);
     }
 
-    /* Verifica que não é proc/func (não se atribui a sub-rotinas) */
+    /* Chamada de procedimento como comando: id(...) */
     if (sym->cat == SYM_PROC || sym->cat == SYM_FUNC) {
-        char msg[300];
-        snprintf(msg, sizeof(msg),
-                 "'%s' e uma sub-rotina e nao pode ser alvo de atribuicao.", id);
-        sem_error(msg);
+        match(sIDENTIF);
+        match(sABRE_PAR);
+        int n_args = 0;
+        if (lookahead.cat != sFECHA_PAR) {
+            parse_expr(); n_args++;
+            while (lookahead.cat == sVIRGULA) {
+                match(sVIRGULA);
+                parse_expr(); n_args++;
+            }
+        }
+        match(sFECHA_PAR);
+
+        if (sym->n_params > 0 && n_args != sym->n_params) {
+            char msg[300];
+            snprintf(msg, sizeof(msg),
+                     "Chamada a '%s': esperado %d argumento(s), fornecido(s) %d.",
+                     id, sym->n_params, n_args);
+            sem_error(msg);
+        }
+
+        if (sym->rotulo_mepa[0] == '\0') {
+            char msg[300];
+            snprintf(msg, sizeof(msg),
+                     "Sub-rotina '%s' nao tem rotulo MEPA definido.", id);
+            sem_error(msg);
+        }
+        ger_emite(NULL, "CHPR", sym->rotulo_mepa, itoa_s(sym->nivel));
+        return;
     }
 
     match(sIDENTIF);
@@ -930,7 +1045,8 @@ static void parse_atr(void) {
 static void parse_ret(void) {
     match(sRET);
     parse_expr();
-    /* O valor de retorno fica no topo da pilha; RTPR é emitido pelo contexto */
+    /* Grava resultado no slot reservado pelo caller (AMEM 1, posição qtde_globais no nivel 0) */
+    ger_emite(NULL, "ARMZ", "0", itoa_s(qtde_globais));
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1105,6 +1221,11 @@ static DataType parse_elem(void) {
                              "'%s' nao e uma funcao ou procedimento.", id);
                     sem_error(msg);
                 }
+
+                /* fn: reserva slot de retorno ANTES dos argumentos */
+                if (sym->cat == SYM_FUNC)
+                    ger_emite(NULL, "AMEM", "1", NULL);
+
                 match(sABRE_PAR);
                 int n_args = 0;
                 if (lookahead.cat != sFECHA_PAR) {
@@ -1116,18 +1237,26 @@ static DataType parse_elem(void) {
                 }
                 match(sFECHA_PAR);
 
-                /* Validação de quantidade de parâmetros */
-                if (sym->extra > 0 && n_args != sym->extra) {
+                if (sym->n_params > 0 && n_args != sym->n_params) {
                     char msg[300];
                     snprintf(msg, sizeof(msg),
                              "Chamada a '%s': esperado %d argumento(s), fornecido(s) %d.",
-                             id, sym->extra, n_args);
+                             id, sym->n_params, n_args);
                     sem_error(msg);
                 }
 
-                /* Geração: CHPR label,nivel (para fase 2 completa) */
-                /* Por ora emitimos NADA como placeholder de chamada */
-                ger_emite(NULL, "NADA", NULL, NULL);  /* placeholder CHPR */
+                if (sym->rotulo_mepa[0] == '\0') {
+                    char msg[300];
+                    snprintf(msg, sizeof(msg),
+                             "Sub-rotina '%s' nao tem rotulo MEPA definido.", id);
+                    sem_error(msg);
+                }
+
+                ger_emite(NULL, "CHPR", sym->rotulo_mepa, itoa_s(sym->nivel));
+
+                /* fn: após retorno, carrega o resultado do slot reservado */
+                if (sym->cat == SYM_FUNC)
+                    ger_emite(NULL, "CRVL", "0", itoa_s(qtde_globais));
 
                 return sym->type;
 
