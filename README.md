@@ -8,4 +8,4 @@ make clean
 make
 
 ## 3. Executar o compilador no arquivo de teste com todas as flags de depuração
-./salc teste.sal --tokens --symtab --trace
+./salc loop_test.sal --tokens --symtab --trace
