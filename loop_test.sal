@@ -1,0 +1,12 @@
+module seq_1_10;
+globals
+    i: int;
+proc main()
+start
+    i:=1;
+    loop while(i <= 10)
+    start
+        print(i);
+        i:=i+1;
+    end;
+end
