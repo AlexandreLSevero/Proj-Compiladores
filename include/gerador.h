@@ -2,6 +2,7 @@
 #define GERADOR_H
 
 #include <stdio.h>
+#include <stdbool.h>
 
 /*
  * gerador.h — Módulo de Geração de Código MEPA
@@ -25,8 +26,9 @@ void ger_close(void);
  * Formato de saída:
  *   [rotulo:] MNEMONICO [param1[,param2]]
  *
- * Parâmetros NULL são ignorados.
- * Parâmetros de instrução com dois endereços são separados por vírgula SEM espaço (requisito do interpretador MEPA).
+ * Parâmetros NULL são simplesmente ignorados.
+ * ATENÇÃO: parâmetros de instrução com dois endereços são separados por
+ *          vírgula SEM espaço (requisito do interpretador MEPA).
  *
  * Exemplos:
  *   ger_emite("L1", "NADA", NULL, NULL)   → "L1: NADA"
@@ -44,8 +46,11 @@ void ger_emite(const char *rotulo, const char *mnemonico,
 char *ger_novo_rotulo(void);
 
 /*
- * Retorna o arquivo de saída .mepa (útil para debug ou escrita direta).
+ * Emite uma string como sequência de CRCT <ascii> (sem empilhar —
+ * cada caractere é emitido e deve ser seguido de IMPR pelo chamador).
+ * Retorna o número de caracteres emitidos.
+ * O parâmetro 'str' deve conter o lexema com aspas (ex: "\"hello\"").
  */
-FILE *ger_get_file(void);
+int ger_emite_string(const char *str);
 
 #endif /* GERADOR_H */
