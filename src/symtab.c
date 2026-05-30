@@ -112,6 +112,8 @@ bool ts_insert(const char *id, SymbolCat cat, DataType type, int extra) {
     s->type  = type;
     s->extra = extra;
     s->nivel = ts.top_scope;
+    s->rotulo_mepa[0] = '\0';
+    s->n_params = 0;
 
     /* Variáveis, vetores e parâmetros recebem offset e incrementam o contador.
      * Procedimentos e funções não ocupam espaço na pilha de dados. */
